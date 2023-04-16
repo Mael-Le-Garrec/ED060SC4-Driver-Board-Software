@@ -1,0 +1,9 @@
+{
+    "version": "2.0.0",
+    "tasks": [{
+        "label": "flash",
+        "command": "cargo",
+        "args": ["flash", "--chip", "stm32f103c8"],
+        "type": "shell"
+    }]
+}
