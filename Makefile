@@ -4,6 +4,9 @@ debug_server:
 debug:
 	cargo run
 
+build:
+	cargo build
+
 flash:
 	cargo flash --chip stm32f103C8
 

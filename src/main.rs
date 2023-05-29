@@ -47,8 +47,8 @@ static mut SPI2SLAVE: Option<SlaveSpi> = None;
 
 #[entry]
 fn main() -> ! {
+    // Let's get the different variables needed to make the STM32 work
     let dp = Peripherals::take().unwrap();
-
     let mut flash = dp.FLASH.constrain();
     let rcc = dp.RCC.constrain();
     let mut afio = dp.AFIO.constrain();
@@ -57,9 +57,17 @@ fn main() -> ! {
     let clocks = rcc.cfgr.use_hse(8.MHz()).freeze(&mut flash.acr);
     let mut delay = dp.TIM2.delay_us(&clocks);
 
-    //let mut afio = dp.AFIO.constrain();
+    // Get the differents pins
     let mut gpioa = dp.GPIOA.split();
     let mut gpiob = dp.GPIOB.split();
+    let mut gpioc = dp.GPIOC.split();
+    
+    // Disable JTAG, to access PB3 and PB4
+    let pa15 = gpioa.pa15;
+    let pb3 = gpiob.pb3;
+    let pb4= gpiob.pb4;
+    let (_, pb3, pb4) = afio.mapr.disable_jtag(pa15, pb3, pb4);
+
 
     // Use SPI2 as slave
     let nss = gpioa.pa4.into_pull_up_input(&mut gpioa.crl);
@@ -114,15 +122,17 @@ fn main() -> ! {
     //let mut led = gpiob.pb5.into_push_pull_output(&mut gpiob.crl);
     //led.set_low();
     
-    // ===== Start the TPS65185
+    // ================================
+    // ====== TPS65185 PMIC
     let mut tps_wake_up = gpiob.pb11.into_push_pull_output(&mut gpiob.crh);
     let mut tps_power_up = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
     let mut tps_vcom_ctrl = gpiob.pb13.into_push_pull_output(&mut gpiob.crh);
+    let tps_pwrgood = gpiob.pb14.into_floating_input(&mut gpiob.crh);
 
-    // Activate the I2C communication and configure the TPS
+    // Activate the I2C communication to configure the TPS
     let tps_address = 0x68;
     tps_wake_up.set_high();
-    delay.delay_ms(1000_u32);  // Wait 1 sec
+    delay.delay_ms(50_u32);  // Give time to the TPS to wakeup
     
     // Enable 3.3V
     let mut configured = match i2c.write(tps_address, &[0x01, 0x20]) { Ok(_) => true, Err(_) => false };
@@ -131,18 +141,34 @@ fn main() -> ! {
     configured = match i2c.write(tps_address, &[0x03, 0x7F]) { Ok(_) => configured, Err(_) => false};
     configured = match i2c.write(tps_address, &[0x04, 0x00]) { Ok(_) => configured, Err(_) => false};
     tps_vcom_ctrl.set_high();
-    
+
     // Start powering up the rails if the configuration was successful
     if configured {
-        delay.delay_ms(100_u32);  // Wait 100ms
         tps_power_up.set_high();
     }
-    else 
-    {
-        delay.delay_ms(1000_u32);  // Just for break point
-    }
+    else { loop {} }
+    
+    // Check from the TPS that all the rails are OK
+    if !tps_pwrgood.is_high() { loop {} }
 
 
+    // ================================
+    // ====== EPD SETUP
+    let mut epd_oe = gpioc.pc13.into_alternate_push_pull(&mut gpioc.crh);
+    let mut epd_gmode = gpiob.pb8.into_alternate_push_pull(&mut gpiob.crh);
+    let mut epd_spv = gpiob.pb9.into_alternate_push_pull(&mut gpiob.crh);
+    let mut epd_ckv = gpiob.pb10.into_alternate_push_pull(&mut gpiob.crh);
+    let mut epd_clk = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
+    let mut epd_sph = gpioa.pa1.into_alternate_push_pull(&mut gpioa.crl);
+    let mut epd_le = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
+    let mut epd_d0 = gpioc.pc14.into_alternate_push_pull(&mut gpioc.crh);
+    let mut epd_d1 = gpioc.pc15.into_alternate_push_pull(&mut gpioc.crh);
+    let mut epd_d2 = gpiob.pb0.into_alternate_push_pull(&mut gpiob.crl);
+    let mut epd_d3 = gpiob.pb1.into_alternate_push_pull(&mut gpiob.crl);
+    let mut epd_d4 = gpiob.pb2.into_alternate_push_pull(&mut gpiob.crl);
+    let mut epd_d5 = pb3.into_alternate_push_pull(&mut gpiob.crl);
+    let mut epd_d6 = pb4.into_alternate_push_pull(&mut gpiob.crl);
+    let mut epd_d7 = gpiob.pb5.into_alternate_push_pull(&mut gpiob.crl);
 
 
     const buffer_len: usize = 8;
