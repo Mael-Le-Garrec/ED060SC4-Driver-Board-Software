@@ -1,0 +1,7 @@
+To change in .vscode/launch.json and Makefile
+
+To debug a chinese clone of the STM32F103C8:
+    openocd -f /usr/share/openocd/scripts/interface/stlink-v2.cfg -f /usr/share/openocd/scripts/target/cs32f1x.cfg
+
+For an official STM32:
+    openocd -f /usr/share/openocd/scripts/interface/stlink-v2.cfg -f /usr/share/openocd/scripts/target/stm32f1x.cfg

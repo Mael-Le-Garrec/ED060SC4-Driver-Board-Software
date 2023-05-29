@@ -6,3 +6,6 @@ debug:
 
 flash:
 	cargo flash --chip stm32f103C8
+
+detect:
+	probe-rs-cli info

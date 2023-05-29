@@ -11,7 +11,7 @@
             "request": "launch",
             "type": "cortex-debug",
             "servertype": "openocd",
-            "configFiles": ["/usr/share/openocd/scripts/interface/stlink-v2.cfg", "/usr/share/openocd/scripts/target/cs32f1x.cfg"],
+            "configFiles": ["/usr/share/openocd/scripts/interface/stlink-v2.cfg", "/usr/share/openocd/scripts/target/stm32f1x.cfg"],
             "searchDir": [],
             "gdbPath": "arm-none-eabi-gdb",
             "runToEntryPoint": "main",
