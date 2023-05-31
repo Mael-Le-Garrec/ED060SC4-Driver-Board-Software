@@ -3,10 +3,7 @@ use panic_halt as _;
 use embedded_hal::{
     digital::v2::{OutputPin, InputPin},
     blocking::i2c::Write as i2cWrite,
-};
-use stm32f1xx_hal::{
-    prelude::*,
-    timer::DelayUs, device::TIM2,
+    blocking::delay::{DelayMs, DelayUs},
 };
 use embedded_error::ImplError::{Internal, self};
 
@@ -15,7 +12,7 @@ use embedded_error::ImplError::{Internal, self};
 /// The rails -20V, -15V, +15V and +22V are then powered up via the default sequence
 /// If a problem happend and the rails couldn't be brought up, and Error is returned
 /// -  `vcom_voltage`: negative voltage to be achieved by the vcom converter
-pub fn configure_TPS<A: i2cWrite, B: OutputPin, C: OutputPin, D: OutputPin, E:InputPin>(i2c: &mut A, delay: &mut DelayUs<TIM2>, wake_up: &mut B, power_up: &mut C, vcom_ctrl: &mut D, vcom_voltage: f32, pwrgood: &E) -> Result<(), ImplError>
+pub fn configure_TPS<A: i2cWrite, B: OutputPin, C: OutputPin, D: OutputPin, E: InputPin, F: DelayUs<u32>+DelayMs<u32>>(i2c: &mut A, delay: &mut F, wake_up: &mut B, power_up: &mut C, vcom_ctrl: &mut D, vcom_voltage: f32, pwrgood: &E) -> Result<(), ImplError>
 {
     // Activate the I2C communication to configure the TPS
     let tps_address = 0x68;
