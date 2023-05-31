@@ -1,4 +1,4 @@
-//! SPI slave mode test
+/*  *///! SPI slave mode test
 //!
 //! spi1 master <-> spi2 slave
 //! PA5 <-SCK-> PB13
@@ -10,27 +10,29 @@
 #![no_main]
 
 use cortex_m_rt::entry;
-use nb::Error;
 use panic_halt as _;
 
 use cortex_m::{asm, singleton};
-use embedded_hal::spi::{Mode as SpiMode, Phase, Polarity};
-pub const SPI_MODE: SpiMode = SpiMode {
-    phase: Phase::CaptureOnFirstTransition,
-    polarity: Polarity::IdleLow,
+use embedded_hal::{
+    spi::{Mode as SpiMode, Phase, Polarity}, 
+    digital::v2::{IoPin, OutputPin, InputPin},
+    blocking::i2c::Write as i2cWrite,
 };
-
 use stm32f1xx_hal::{
     gpio::{
         gpiob::{PB13, PB14, PB15},
-        Alternate, Floating, Input, PushPull,
+        Alternate, Floating, Input, PushPull, Pin, Output, HL, Active, 
     },
     pac::{self, interrupt, Peripherals, SPI2},
     prelude::*,
     spi::{Event, Slave, Spi, Spi2NoRemap, NoMiso},
-    i2c::{BlockingI2c, DutyCycle, Mode},
+    i2c::{BlockingI2c, DutyCycle, Mode, Error as i2cError}, timer::{Delay, DelayUs}, device::TIM2,
 };
+use embedded_error::ImplError::{Internal, self};
 
+mod tps65185;
+
+// ====================
 type SlaveSpi = Spi<
     SPI2,
     Spi2NoRemap,
@@ -42,7 +44,10 @@ type SlaveSpi = Spi<
     u8,
     Slave,
 >;
-
+pub const SPI_MODE: SpiMode = SpiMode {
+    phase: Phase::CaptureOnFirstTransition,
+    polarity: Polarity::IdleLow,
+};
 static mut SPI2SLAVE: Option<SlaveSpi> = None;
 
 #[entry]
@@ -128,47 +133,76 @@ fn main() -> ! {
     let mut tps_power_up = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
     let mut tps_vcom_ctrl = gpiob.pb13.into_push_pull_output(&mut gpiob.crh);
     let tps_pwrgood = gpiob.pb14.into_floating_input(&mut gpiob.crh);
-
-    // Activate the I2C communication to configure the TPS
-    let tps_address = 0x68;
-    tps_wake_up.set_high();
-    delay.delay_ms(50_u32);  // Give time to the TPS to wakeup
-    
-    // Enable 3.3V
-    let mut configured = match i2c.write(tps_address, &[0x01, 0x20]) { Ok(_) => true, Err(_) => false };
-
-    // Enable VCOM (-1.27V => 0x7F on VCOM1, 0 on VCOM2)
-    configured = match i2c.write(tps_address, &[0x03, 0x7F]) { Ok(_) => configured, Err(_) => false};
-    configured = match i2c.write(tps_address, &[0x04, 0x00]) { Ok(_) => configured, Err(_) => false};
-    tps_vcom_ctrl.set_high();
-
-    // Start powering up the rails if the configuration was successful
-    if configured {
-        tps_power_up.set_high();
+  
+    let vcom_voltage = -1.27;
+    match tps65185::configure_TPS(&mut i2c, &mut delay, &mut tps_wake_up, &mut tps_power_up, 
+                                  &mut tps_vcom_ctrl, vcom_voltage, &tps_pwrgood) 
+    { 
+        Ok(_) => {},
+        Err(_) => loop {}
     }
-    else { loop {} }
-    
-    // Check from the TPS that all the rails are OK
-    if !tps_pwrgood.is_high() { loop {} }
+
+    loop {}
 
 
     // ================================
     // ====== EPD SETUP
-    let mut epd_oe = gpioc.pc13.into_alternate_push_pull(&mut gpioc.crh);
-    let mut epd_gmode = gpiob.pb8.into_alternate_push_pull(&mut gpiob.crh);
-    let mut epd_spv = gpiob.pb9.into_alternate_push_pull(&mut gpiob.crh);
-    let mut epd_ckv = gpiob.pb10.into_alternate_push_pull(&mut gpiob.crh);
-    let mut epd_clk = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
-    let mut epd_sph = gpioa.pa1.into_alternate_push_pull(&mut gpioa.crl);
-    let mut epd_le = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
-    let mut epd_d0 = gpioc.pc14.into_alternate_push_pull(&mut gpioc.crh);
-    let mut epd_d1 = gpioc.pc15.into_alternate_push_pull(&mut gpioc.crh);
-    let mut epd_d2 = gpiob.pb0.into_alternate_push_pull(&mut gpiob.crl);
-    let mut epd_d3 = gpiob.pb1.into_alternate_push_pull(&mut gpiob.crl);
-    let mut epd_d4 = gpiob.pb2.into_alternate_push_pull(&mut gpiob.crl);
-    let mut epd_d5 = pb3.into_alternate_push_pull(&mut gpiob.crl);
-    let mut epd_d6 = pb4.into_alternate_push_pull(&mut gpiob.crl);
-    let mut epd_d7 = gpiob.pb5.into_alternate_push_pull(&mut gpiob.crl);
+    let mut epd_oe = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+    let mut epd_gmode = gpiob.pb8.into_push_pull_output(&mut gpiob.crh);
+    let mut epd_spv = gpiob.pb9.into_push_pull_output(&mut gpiob.crh);
+    let mut epd_ckv = gpiob.pb10.into_push_pull_output(&mut gpiob.crh);
+    let mut epd_clk = gpioa.pa0.into_push_pull_output(&mut gpioa.crl);
+    let mut epd_sph = gpioa.pa1.into_push_pull_output(&mut gpioa.crl);
+    let mut epd_le = gpioa.pa2.into_push_pull_output(&mut gpioa.crl);
+    let mut epd_d0 = gpioc.pc14.into_push_pull_output(&mut gpioc.crh);
+    let mut epd_d1 = gpioc.pc15.into_push_pull_output(&mut gpioc.crh);
+    let mut epd_d2 = gpiob.pb0.into_push_pull_output(&mut gpiob.crl);
+    let mut epd_d3 = gpiob.pb1.into_push_pull_output(&mut gpiob.crl);
+    let mut epd_d4 = gpiob.pb2.into_push_pull_output(&mut gpiob.crl);
+    let mut epd_d5 = pb3.into_push_pull_output(&mut gpiob.crl);
+    let mut epd_d6 = pb4.into_push_pull_output(&mut gpiob.crl);
+    let mut epd_d7 = gpiob.pb5.into_push_pull_output(&mut gpiob.crl);
+
+    //fn enable_draw_mode<const A: char, const B: u8, const C: char, const D: u8, const E: char, const F: u8>(gmode: &mut Pin<A, B, Output>, ckv: &mut Pin<C, D, Output>, sph: &mut Pin<E, F, Output>)  {
+    //}
+    //enable_draw_mode(&mut epd_gmode, &mut epd_ckv, &mut epd_sph);
+
+    //fn start_frame<const A: char, const B: u8>(gmode: &mut Pin<A, B, Output>, ckv: &mut Pin<A, B, Output>, spv: &mut Pin<A, B, Output>) 
+    fn start_frame<A: OutputPin, B: OutputPin, C: OutputPin>(gmode: &mut A, ckv: &mut B, spv: &mut C)
+    {
+        gmode.set_high();
+
+        ckv.set_high();
+        //delay.delay_us(1_u32);           
+        ckv.set_low();
+
+        spv.set_low();
+        
+        ckv.set_high();
+        //delay.delay_us(1_u32);           
+        ckv.set_low();
+
+        spv.set_high();
+        
+        ckv.set_high();
+        //delay.delay_us(1_u32);           
+        ckv.set_low();
+    }
+    start_frame(& mut epd_gmode, &mut epd_ckv, &mut epd_spv);
+
+    // Activate the display
+    epd_oe.set_high();  // Output Enable
+
+    // Start a frame
+    epd_gmode.set_high();
+    epd_ckv.set_high();
+
+
+    epd_le.set_low();
+    epd_spv.set_low();
+    epd_ckv.set_low();
+    epd_ckv.set_high();
+    epd_spv.set_high();
 
 
     const buffer_len: usize = 8;
